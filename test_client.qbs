@@ -2,5 +2,13 @@ import qbs
 
 CppApplication {
     type: "application"
-    files: "raw_socket_write/raw_socket.c"
+    Group {
+        name: 'Test Session Connection'
+        files: ['src/test_session.c']
+        cpp.includePaths: ["../libtee/include"]
+        cpp.libraryPaths: ["../libtee-build/qtc_Desktop-debug"]
+        cpp.dynamicLibraries: ["libtee"]
+    }
+
+   // files: "src/raw_socket.c"
 }
