@@ -2,13 +2,15 @@ import qbs
 
 CppApplication {
     type: "application"
-    Group {
-        name: 'Test Session Connection'
-        files: ['src/test_session.c']
-        cpp.includePaths: ["../libtee/include"]
-        cpp.libraryPaths: ["../libtee-build/qtc_Desktop-debug"]
-        cpp.dynamicLibraries: ["libtee"]
-    }
+    name: "test_session"
+    Depends { name: "tee" }
 
-   // files: "src/raw_socket.c"
+    files: ['src/test_session.c']
 }
+
+//CppApplication {
+//    type: "application"
+//    name: "test_write_sock"
+//    Depends { name: "tee" }
+//    files: "src/raw_socket.c"
+//}
