@@ -4,6 +4,7 @@ CppApplication {
     type: "application"
     name: "test_session"
     Depends { name: "tee" }
+    consoleApplication: true
 
     files: ['src/test_session.c']
 }
