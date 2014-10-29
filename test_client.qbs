@@ -6,7 +6,7 @@ CppApplication {
     Depends { name: "tee" }
     consoleApplication: true
 
-    files: ['src/test_session.c']
+    files: ['src/conn_test_app.c']
 }
 
 //CppApplication {
