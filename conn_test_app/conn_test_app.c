@@ -14,7 +14,7 @@
 ** limitations under the License.                                           **
 *****************************************************************************/
 
-/* Simple application for testing entry point functions.
+/* Simple application for testing entry point functions calling.
  * Application will be updated as manager process development goes forward */
 
 #include "tee_client_api.h"
