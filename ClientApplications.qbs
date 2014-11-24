@@ -7,6 +7,7 @@ Project {
         "test_session/test_session.qbs",
 	"smoke_test_CAs/smoke_test_CAs.qbs",
 	"example_sha1_ca/example_sha1_ca.qbs",
+	"tester_CA/tester_CA.qbs"
     ]
 }
 
