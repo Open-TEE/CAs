@@ -45,6 +45,8 @@ static const TEEC_UUID uuid = {
 #define FAILED_TO_OPEN_SESSION 9
 #define FAILED_TO_REGISTER_INPUT_MEMORY 10
 #define FAILED_TO_REGISTER_OUTPUT_MEMORY 11
+#define FAILED_TO_INVOKE_COMMAND 12
+
 #define ZERO_LENGTH_INPUTS 12
 
 uint32_t get_input_length(char* input_length_str) {
@@ -157,12 +159,17 @@ int run_sha_tests(char* input_file, char* length_file, char* expected_output_fil
         return_code = INVALID_LENGTH_FILE;
         goto end_5;
     }
+    output_fd = fopen(expected_output_file, "r");
+    if(!output_fd) {
+        return_code = INVALID_OUTPUT_FILE;
+        goto end_5;
+    }
 
     while(fgets(input_length_as_char, MAX_INPUT_CHAR_LENGTH, length_fd) != NULL) {
         input_length = get_input_length(input_length_as_char);
         if(input_length == 0) {
             return_code = ZERO_LENGTH_INPUTS;
-            goto end_4;
+            goto end_5;
         }
         while(input_length > MAX_INPUT_LENGTH_SINGLE_OPERATION) {
             fread(input,MAX_INPUT_LENGTH_SINGLE_OPERATION,1,input_fd);
@@ -176,7 +183,8 @@ int run_sha_tests(char* input_file, char* length_file, char* expected_output_fil
             ret = TEEC_InvokeCommand(&session, HASH_UPDATE, &operation, &return_origin);
             if (ret != TEEC_SUCCESS) {
                 printf("TEEC_InvokeCommand failed: 0x%x\n", ret);
-                goto end_3;
+                return_code = FAILED_TO_INVOKE_COMMAND;
+                goto end_5;
             } else {
                 printf("done\n");
                 input_length -= MAX_INPUT_LENGTH_SINGLE_OPERATION;
@@ -200,7 +208,8 @@ int run_sha_tests(char* input_file, char* length_file, char* expected_output_fil
         ret = TEEC_InvokeCommand(&session, HASH_DO_FINAL, &operation, &return_origin);
         if (ret != TEEC_SUCCESS) {
             printf("TEEC_InvokeCommand failed: 0x%x\n", ret);
-            goto end_4;
+            return_code = FAILED_TO_INVOKE_COMMAND;
+            goto end_5;
         } else {
             printf("done\n");
         }
@@ -209,6 +218,7 @@ int run_sha_tests(char* input_file, char* length_file, char* expected_output_fil
         for (i = 0; i < SHA1_SIZE; i++)
             printf("%02x", output[i]);
         printf("\n");
+        fgets(expected_output, SHA512_SIZE, output_fd);
     }
         /* Cleanup used connection/resources */
     end_5:

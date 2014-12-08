@@ -2,7 +2,7 @@ import qbs
 
 CppApplication {
     type: "application"
-    name: "crypto_tester"
+    name: "crypto_tester_ca"
     consoleApplication:true
     destinationDirectory: '.'
 
