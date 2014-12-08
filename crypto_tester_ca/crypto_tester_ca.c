@@ -13,6 +13,7 @@
 ** See the License for the specific language governing permissions and      **
 ** limitations under the License.                                           **
 *****************************************************************************/
+
 #include "tee_client_api.h"
 
 #include <stdio.h>
@@ -73,8 +74,8 @@ uint32_t get_input_length(char* input_length_str) {
 	return (uint32_t)length;
 }
 
-int run_sha_tests(char* input_file, char* length_file,
-				  char* expected_output_file, char* algorithm_to_test)
+int run_sha_tests(char *input_file, char *length_file,
+				char *expected_output_file, char *algorithm_to_test)
 {
 	TEEC_Context context;
 	TEEC_Session session;
@@ -126,7 +127,7 @@ int run_sha_tests(char* input_file, char* length_file,
 	/* Open session */
 	printf("Openning session: ");
 	ret = TEEC_OpenSession(&context, &session, &uuid, connection_method,
-						   NULL, &operation, &return_origin);
+						NULL, &operation, &return_origin);
 	if (ret != TEEC_SUCCESS) {
 		printf("TEEC_OpenSession failed: 0x%x\n", ret);
 		return_code = FAILED_TO_OPEN_SESSION;
