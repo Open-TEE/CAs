@@ -53,7 +53,7 @@ uint32_t get_input_length(char* input_length_str) {
     char* error;
     long length = 0;
     length = strtol(input_length_str, &error, 0);
-    if(*error != '\0') {
+    if (*error != '\0') {
         return 0;
     }
     return (uint32_t)length;
@@ -79,7 +79,7 @@ int run_sha_tests(char* input_file, char* length_file, char* expected_output_fil
     FILE *output_fd = NULL;
     uint32_t input_length;
     uint32_t i = 0;
-    if(strcmp(algorithm_to_test, "SHA1") == 0) {
+    if (strcmp(algorithm_to_test, "SHA1") == 0) {
         algorithm = HASH_SHA1;
     } else if (strcmp(algorithm_to_test, "SHA224") == 0) {
         algorithm = HASH_SHA224;
@@ -155,23 +155,23 @@ int run_sha_tests(char* input_file, char* length_file, char* expected_output_fil
     }
 
     length_fd = fopen(length_file, "r");
-    if(!length_fd) {
+    if (!length_fd) {
         return_code = INVALID_LENGTH_FILE;
         goto end_5;
     }
     output_fd = fopen(expected_output_file, "r");
-    if(!output_fd) {
+    if (!output_fd) {
         return_code = INVALID_OUTPUT_FILE;
         goto end_5;
     }
 
-    while(fgets(input_length_as_char, MAX_INPUT_CHAR_LENGTH, length_fd) != NULL) {
+    while (fgets(input_length_as_char, MAX_INPUT_CHAR_LENGTH, length_fd) != NULL) {
         input_length = get_input_length(input_length_as_char);
-        if(input_length == 0) {
+        if (input_length == 0) {
             return_code = ZERO_LENGTH_INPUTS;
             goto end_5;
         }
-        while(input_length > MAX_INPUT_LENGTH_SINGLE_OPERATION) {
+        while (input_length > MAX_INPUT_LENGTH_SINGLE_OPERATION) {
             fread(input,MAX_INPUT_LENGTH_SINGLE_OPERATION,1,input_fd);
             /* Fill operation parameters */
             operation.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_WHOLE, TEEC_VALUE_INPUT, TEEC_NONE, TEEC_NONE);
@@ -194,7 +194,7 @@ int run_sha_tests(char* input_file, char* length_file, char* expected_output_fil
 
         /* Fill operation parameters */
         operation.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_WHOLE, TEEC_VALUE_INPUT,
-                            TEEC_MEMREF_WHOLE, TEEC_NONE);
+                                                TEEC_MEMREF_WHOLE, TEEC_NONE);
         /*
          * reuse the origional input shared memory, because we have just updated the contents
          * of the buffer
@@ -218,38 +218,38 @@ int run_sha_tests(char* input_file, char* length_file, char* expected_output_fil
         for (i = 0; i < SHA1_SIZE; i++)
             printf("%02x", output[i]);
         printf("\n");
-        fgets(expected_output, SHA512_SIZE, output_fd);
+        //fgets(expected_output, SHA512_SIZE, output_fd);
     }
-        /* Cleanup used connection/resources */
-    end_5:
-        if(input_fd != NULL) {
-            fclose(input_fd);
-        }
-        if (output_fd != NULL) {
-            fclose(output_fd);
-        }
-        if(length_fd != NULL) {
-            fclose(length_fd);
-        }
-    end_4:
+    /* Cleanup used connection/resources */
+end_5:
+    if (input_fd != NULL) {
+        fclose(input_fd);
+    }
+    if (output_fd != NULL) {
+        fclose(output_fd);
+    }
+    if (length_fd != NULL) {
+        fclose(length_fd);
+    }
+end_4:
 
-        printf("Releasing shared out memory..\n");
-        TEEC_ReleaseSharedMemory(&out_mem);
+    printf("Releasing shared out memory..\n");
+    TEEC_ReleaseSharedMemory(&out_mem);
 
-    end_3:
-        printf("Releasing shared in memory..\n");
-        TEEC_ReleaseSharedMemory(&in_mem);
-        printf("Closing session..\n");
-        TEEC_CloseSession(&session);
+end_3:
+    printf("Releasing shared in memory..\n");
+    TEEC_ReleaseSharedMemory(&in_mem);
+    printf("Closing session..\n");
+    TEEC_CloseSession(&session);
 
-    end_2:
+end_2:
 
-        printf("Finalizing ctx..\n");
-        TEEC_FinalizeContext(&context);
-    end_1:
+    printf("Finalizing ctx..\n");
+    TEEC_FinalizeContext(&context);
+end_1:
 
-        printf("END: example SHA1 calc app\n");
-        return return_code;
+    printf("END: example SHA1 calc app\n");
+    return return_code;
 }
 
 int main(int argc, char **argv)
@@ -259,11 +259,11 @@ int main(int argc, char **argv)
     char* length_file;
     char* expected_output_file;
     char* algorithm_to_test;
-    while((option = getopt(argc,argv, "i:l:e:a:")) != -1) {
-        if(optarg == NULL || strlen(optarg) > MAX_ARGUMENT_LENGTH) {
+    while ((option = getopt(argc,argv, "i:l:e:a:")) != -1) {
+        if (optarg == NULL || strlen(optarg) > MAX_ARGUMENT_LENGTH) {
             return TOO_LONG_ARGUMENTS_ERROR;
         }
-        switch(option) {
+        switch (option) {
         case 'i':
             input_file = optarg;
             break;
