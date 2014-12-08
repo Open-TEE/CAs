@@ -1,3 +1,18 @@
+/*****************************************************************************
+** Copyright (C) 2014 Intel Corporation.                                    **
+**                                                                          **
+** Licensed under the Apache License, Version 2.0 (the "License");          **
+** you may not use this file except in compliance with the License.         **
+** You may obtain a copy of the License at                                  **
+**                                                                          **
+**      http://www.apache.org/licenses/LICENSE-2.0                          **
+**                                                                          **
+** Unless required by applicable law or agreed to in writing, software      **
+** distributed under the License is distributed on an "AS IS" BASIS,        **
+** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. **
+** See the License for the specific language governing permissions and      **
+** limitations under the License.                                           **
+*****************************************************************************/
 #include "tee_client_api.h"
 
 #include <stdio.h>
@@ -58,7 +73,8 @@ uint32_t get_input_length(char* input_length_str) {
 	return (uint32_t)length;
 }
 
-int run_sha_tests(char* input_file, char* length_file, char* expected_output_file, char* algorithm_to_test)
+int run_sha_tests(char* input_file, char* length_file,
+				  char* expected_output_file, char* algorithm_to_test)
 {
 	TEEC_Context context;
 	TEEC_Session session;
@@ -103,7 +119,8 @@ int run_sha_tests(char* input_file, char* length_file, char* expected_output_fil
 	}
 
 	/* Open session is expecting HASH algorithm */
-	operation.paramTypes = TEEC_PARAM_TYPES(TEEC_VALUE_INPUT, TEEC_NONE, TEEC_NONE, TEEC_NONE);
+	operation.paramTypes = TEEC_PARAM_TYPES(TEEC_VALUE_INPUT,
+											TEEC_NONE, TEEC_NONE, TEEC_NONE);
 	operation.params[0].value.a = algorithm;
 
 	/* Open session */
