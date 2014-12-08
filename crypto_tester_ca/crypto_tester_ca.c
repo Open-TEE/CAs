@@ -50,12 +50,11 @@ static const TEEC_UUID uuid = {
 #define ZERO_LENGTH_INPUTS 12
 
 uint32_t get_input_length(char* input_length_str) {
-	char* error;
+	char *error;
 	long length = 0;
 	length = strtol(input_length_str, &error, 0);
-	if (*error != '\0') {
+	if (*error != '\0')
 		return 0;
-	}
 	return (uint32_t)length;
 }
 
@@ -79,19 +78,18 @@ int run_sha_tests(char* input_file, char* length_file, char* expected_output_fil
 	FILE *output_fd = NULL;
 	uint32_t input_length;
 	uint32_t i = 0;
-	if (strcmp(algorithm_to_test, "SHA1") == 0) {
+	if (strcmp(algorithm_to_test, "SHA1") == 0)
 		algorithm = HASH_SHA1;
-	} else if (strcmp(algorithm_to_test, "SHA224") == 0) {
+	else if (strcmp(algorithm_to_test, "SHA224") == 0)
 		algorithm = HASH_SHA224;
-	} else if (strcmp(algorithm_to_test, "SHA256") == 0) {
+	else if (strcmp(algorithm_to_test, "SHA256") == 0)
 		algorithm = HASH_SHA256;
-	} else if (strcmp(algorithm_to_test, "SHA384") == 0) {
+	else if (strcmp(algorithm_to_test, "SHA384") == 0)
 		algorithm = HASH_SHA384;
-	} else if (strcmp(algorithm_to_test, "SHA512") == 0) {
+	else if (strcmp(algorithm_to_test, "SHA512") == 0)
 		algorithm = HASH_SHA512;
-	} else {
+	else
 		return UNKNOWN_ALGORITHM_ERROR;
-	}
 
 	/* Initialize context */
 	printf("Initializing context: ");
@@ -147,7 +145,7 @@ int run_sha_tests(char* input_file, char* length_file, char* expected_output_fil
 	}
 	printf("Registered out mem..\n");
 
-	// open input file and lengths file
+	/* open files before loop */
 	input_fd = fopen(input_file, "r");
 	if (!input_fd) {
 		return_code = INVALID_INPUT_FILE;
@@ -172,9 +170,11 @@ int run_sha_tests(char* input_file, char* length_file, char* expected_output_fil
 			goto end_5;
 		}
 		while (input_length > MAX_INPUT_LENGTH_SINGLE_OPERATION) {
-			fread(input,MAX_INPUT_LENGTH_SINGLE_OPERATION,1,input_fd);
+			fread(input, MAX_INPUT_LENGTH_SINGLE_OPERATION, 1, input_fd);
 			/* Fill operation parameters */
-			operation.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_WHOLE, TEEC_VALUE_INPUT, TEEC_NONE, TEEC_NONE);
+			operation.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_WHOLE,
+													TEEC_VALUE_INPUT,
+													TEEC_NONE, TEEC_NONE);
 			operation.params[0].memref.parent = &in_mem;
 			operation.params[1].value.a = MAX_INPUT_LENGTH_SINGLE_OPERATION;
 
@@ -190,15 +190,13 @@ int run_sha_tests(char* input_file, char* length_file, char* expected_output_fil
 				input_length -= MAX_INPUT_LENGTH_SINGLE_OPERATION;
 			}
 		}
-		fread(input,input_length,1,input_fd);
+		fread(input, input_length, 1, input_fd);
 
 		/* Fill operation parameters */
 		operation.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_WHOLE, TEEC_VALUE_INPUT,
 												TEEC_MEMREF_WHOLE, TEEC_NONE);
-		/*
-		 * reuse the origional input shared memory, because we have just updated the contents
-		 * of the buffer
-		 */
+
+		/* reuse the original input shared memory */
 		operation.params[0].memref.parent = &in_mem;
 		operation.params[1].value.a = input_length;
 		operation.params[2].memref.parent = &out_mem;
@@ -218,19 +216,16 @@ int run_sha_tests(char* input_file, char* length_file, char* expected_output_fil
 		for (i = 0; i < SHA1_SIZE; i++)
 			printf("%02x", output[i]);
 		printf("\n");
-		//fgets(expected_output, SHA512_SIZE, output_fd);
+		/* fgets(expected_output, SHA512_SIZE, output_fd); */
 	}
 	/* Cleanup used connection/resources */
 end_5:
-	if (input_fd != NULL) {
+	if (input_fd != NULL)
 		fclose(input_fd);
-	}
-	if (output_fd != NULL) {
+	if (output_fd != NULL)
 		fclose(output_fd);
-	}
-	if (length_fd != NULL) {
+	if (length_fd != NULL)
 		fclose(length_fd);
-	}
 end_4:
 
 	printf("Releasing shared out memory..\n");
@@ -255,14 +250,13 @@ end_1:
 int main(int argc, char **argv)
 {
 	int option;
-	char* input_file;
-	char* length_file;
-	char* expected_output_file;
-	char* algorithm_to_test;
+	char *input_file;
+	char *length_file;
+	char *expected_output_file;
+	char *algorithm_to_test;
 	while ((option = getopt(argc,argv, "i:l:e:a:")) != -1) {
-		if (optarg == NULL || strlen(optarg) > MAX_ARGUMENT_LENGTH) {
+		if (optarg == NULL || strlen(optarg) > MAX_ARGUMENT_LENGTH)
 			return TOO_LONG_ARGUMENTS_ERROR;
-		}
 		switch (option) {
 		case 'i':
 			input_file = optarg;
@@ -282,7 +276,7 @@ int main(int argc, char **argv)
 	}
 	printf("input file: %s\n", input_file);
 
-	printf("expected output file: %s\n" ,expected_output_file);
+	printf("expected output file: %s\n", expected_output_file);
 
 	printf("algorithm to test: %s\n", algorithm_to_test);
 
