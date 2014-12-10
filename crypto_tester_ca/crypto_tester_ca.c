@@ -71,9 +71,8 @@ uint32_t get_input_length(char* input_length_str) {
 	long length = 0;
 	for(j = 0; j < strlen(input_length_str); ++j) {
 		char one_char = input_length_str[j];
-		if (one_char == '\n' || one_char == '\r') {
+		if (one_char == '\n' || one_char == '\r')
 			input_length_str[j] = '\0';
-		}
 	}
 	length = strtol(input_length_str, &error, 0);
 	if (*error != '\0')
@@ -245,12 +244,12 @@ int run_sha_tests(char *input_file, char *length_file,
 		printf("Calculated %s: ", algorithm_to_test);
 		for (i = 0; i < size_to_use; i++)
 			sprintf(&hex_output[i*2], "%02x", output[i]);
-			if(hex_output[i] == '\0')
+			if (hex_output[i] == '\0')
 				break;
 		printf("%s\n", hex_output);
-		if(fgets(expected_hex_output, HEX_OUTPUT_MAX_SIZE, output_fd) != NULL) {
+		if (fgets(expected_hex_output, HEX_OUTPUT_MAX_SIZE, output_fd) != NULL) {
 			expected_hex_output[strlen(expected_hex_output)-1] = '\0';
-			if(strcmp(expected_hex_output, hex_output)) {
+			if (strcmp(expected_hex_output, hex_output)) {
 				printf("Test Success!\n");
 				++succesful;
 			}
