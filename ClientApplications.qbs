@@ -8,6 +8,7 @@ Project {
         "smoke_test_CAs/smoke_test_CAs.qbs",
         "example_sha1_ca/example_sha1_ca.qbs",
         "storage_test_ca/storage_test_ca.qbs",
+        "trusted_ui_example_ca/trusted_ui_example_ca.qbs",
         "usr_study_ca/usr_study_ca.qbs",
     ]
 }
