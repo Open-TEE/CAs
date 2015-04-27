@@ -102,6 +102,33 @@ int main()
 		printf("invoked\n");
 	}
 
+	/* Invoke command many times*/
+	i = 1000;
+	while (i--) {
+
+		if ((i%10) == 0)
+			printf("memtest: %i/1000\n", i);
+
+
+		memset(dummy_data_arr, 2, sizeof(dummy_data_arr));
+
+		ret = TEEC_InvokeCommand(&session, 1, &operation, &return_origin);
+		if (ret != TEEC_SUCCESS) {
+			printf("TEEC_InvokeCommand failed: 0x%x\n", ret);
+			goto end_3;
+		} else {
+			int n = 20;
+
+			while (n--) {
+				if (dummy_data_arr[n] != 3) {
+					printf("Data not correct failed: 0x%x\n",
+							dummy_data_arr[n]);
+					goto end_3;
+				}
+			}
+		}
+	}
+
 	/* Cleanup used connection/resources */
 
 end_3:
