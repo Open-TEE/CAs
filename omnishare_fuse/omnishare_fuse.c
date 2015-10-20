@@ -40,6 +40,14 @@
 /* Persistant config data */
 struct om_state {
 	char *root_dir;
+	void *tee_session;
+};
+
+/* Persistant context related to an open file or directory */
+struct om_file_context {
+	uint64_t fd;
+	void *context;
+	uint8_t is_saved;
 };
 
 static int recurse_dir(char *parent_dir, uint8_t **key_chain, int *key_count, uint32_t *key_len)
@@ -127,6 +135,7 @@ static int generate_dir_key(char *parent_dir, uint8_t *key_buf, uint32_t *key_bu
 	int key_count = 0;
 	uint32_t key_len = 0;
 	int ret;
+	void *om_session = ((struct om_state *)fuse_get_context()->private_data)->tee_session;
 
 	if (rewind_path_get_key(parent_dir, &keychain, &key_count, &key_len))
 		return -1;
@@ -138,34 +147,31 @@ static int generate_dir_key(char *parent_dir, uint8_t *key_buf, uint32_t *key_bu
 	if (*key_buf_size < key_len) {
 		OT_LOG(LOG_ERR, "Key_buf too small need (%d)", key_len);
 		*key_buf_size = key_len;
-		return -ENOBUFS;
+		ret = -ENOBUFS;
+		goto out;
 	}
 
 	ret = omnishare_do_crypto(keychain, key_count, key_len, OM_OP_CREATE_DIRECTORY_KEY,
-				  NULL, 0, key_buf, key_buf_size);
+				  NULL, 0, key_buf, key_buf_size, om_session);
 	if (ret) {
 		OT_LOG(LOG_ERR, "Failed to omnishare_do_crypto : 0x%x", ret);
-		return ret;
+		goto out;
 	}
 
-	return 0;
+out:
+	free(keychain);
+
+	return ret;
 }
 
-static int enc_dec_file(char *parent_dir, const char *file_buf, uint32_t size, uint8_t op,
-			uint8_t *out_dest, uint32_t *out_dest_len)
+static int enc_dec_file(struct om_file_context *context, const char *file_buf, uint32_t size,
+			uint8_t op, uint8_t *out_dest, uint32_t *out_dest_len)
 {
-	uint8_t *keychain = NULL;
-	int key_count = 0;
-	uint32_t key_len = 0;
 	int ret;
-	uint8_t dest[size + 32];
-	uint32_t dest_len = size + 32;
+	uint8_t dest[size];
+	uint32_t dest_len = size;
 
-	if (rewind_path_get_key(parent_dir, &keychain, &key_count, &key_len))
-		return -1;
-
-	ret = omnishare_do_crypto(keychain, key_count, key_len, op, (uint8_t *)file_buf,
-				  size, dest, &dest_len);
+	ret = omnishare_invoke(op, (uint8_t *)file_buf, size, dest, &dest_len, context->context);
 	if (ret) {
 		OT_LOG(LOG_ERR, "Failed to omnishare_do_crypto : op 0x%x: 0x%x", op, ret);
 		return ret;
@@ -219,7 +225,7 @@ int oms_getattr(const char *path, struct stat *buf)
 		return -1;
 
 	if (lstat(abs_path, buf)) {
-		OT_LOG(LOG_ERR, "Failed to lstat : %s", strerror(errno));
+		OT_LOG(LOG_ERR, "Failed to lstat %s : %s", abs_path, strerror(errno));
 		return -errno;
 	}
 
@@ -408,9 +414,17 @@ int oms_open(const char *path, struct fuse_file_info *info)
 {
 	int fd;
 	char abs_path[MAX_PATH_NAME];
+	struct om_file_context *context = NULL;
+	int ret;
+	uint8_t *keychain = NULL;
+	int key_count = 0;
+	uint32_t key_len = AES_KEY_SIZE;
+	uint8_t enc_key[AES_KEY_SIZE] = {0};
 
 	if (fixup_root_path(abs_path, path))
 		return -1;
+
+	OT_LOG(LOG_ERR, "OPENING FILE : %s", abs_path);
 
 	fd = open(abs_path, info->flags);
 	if (fd < 0) {
@@ -418,9 +432,56 @@ int oms_open(const char *path, struct fuse_file_info *info)
 		return -errno;
 	}
 
-	info->fh = fd;
+	context = calloc(1, sizeof(struct om_file_context));
+	if (context == NULL) {
+		OT_LOG(LOG_ERR, "Failed to calloc : %s", strerror(errno));
+		ret = -errno;
+		goto out_err;
+	}
+
+	if (rewind_path_get_key(dirname(abs_path), &keychain, &key_count, &key_len)) {
+		ret = -errno;
+		goto out_err;
+	}
+
+	if (AES_KEY_SIZE < key_len) {
+		OT_LOG(LOG_ERR, "Mismatch between AES_KEY_SIZE (%d) and key_len (%d)",
+		       AES_KEY_SIZE, key_len);
+		ret = -1;
+		goto out_err;
+	}
+
+	if (read(fd, enc_key, key_len) < 0) {
+		OT_LOG(LOG_ERR, "Failed to read key from file %s : %s", abs_path, strerror(errno));
+		ret = -errno;
+		goto out_err;
+	}
+
+	/* reset to read pointer, as it may be unexpected that the open
+	 * actually progresses the offset position
+	 */
+	if (lseek(fd, 0, SEEK_SET) < 0) {
+		OT_LOG(LOG_ERR, "Failed to lseek : %s", strerror(errno));
+		ret = -errno;
+		goto out_err;
+	}
+
+	ret = omnishare_opensession(keychain, key_count, key_len, OM_OP_OPEN_FILE,
+				    enc_key, key_len, NULL, &key_len, &context->context);
+	if (ret < 0) {
+		OT_LOG(LOG_ERR, "Failed to open session 0x%x", ret);
+		goto out_err;
+	}
+
+	context->fd = fd;
+	info->fh = (uint64_t)context;
 
 	return 0;
+
+out_err:
+	close(fd);
+	free(context);
+	return ret;
 }
 
 
@@ -444,30 +505,33 @@ int oms_read(const char *path, char *buf, size_t size, off_t offset,
 	uint8_t tmp_dec_buf[size];
 	uint32_t tmp_dec_buf_size = size;
 	struct stat s_buf;
+	struct om_file_context *context;
 
 	if (fixup_root_path(abs_path, path))
 		return -1;
 
 	if (stat(abs_path, &s_buf) != 0) {
 		OT_LOG(LOG_ERR, "Failed to call stat : %s", strerror(errno));
-		return -1;
+		return -errno;
 	}
 
-	ret = pread(info->fh, enc_buf, s_buf.st_size, offset);
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
+
+	ret = pread(context->fd, enc_buf, s_buf.st_size, offset);
 	if (ret < 0) {
 		OT_LOG(LOG_ERR, "Failed to pread : %s", strerror(errno));
-		ret = -errno;
-		goto out;
+		return -errno;
 	}
 
-	ret = enc_dec_file(dirname(abs_path), enc_buf, s_buf.st_size,
-			   OM_OP_DECRYPT_FILE, tmp_dec_buf, &tmp_dec_buf_size);
+	ret = enc_dec_file(context, enc_buf, s_buf.st_size, OM_OP_DECRYPT_FILE,
+			   tmp_dec_buf, &tmp_dec_buf_size);
 	if (ret != 0)
 		return -errno;
 
 	memcpy(buf, tmp_dec_buf, tmp_dec_buf_size);
 
-out:
 	return size;
 }
 
@@ -485,17 +549,24 @@ int oms_write(const char *path, const char *buf, size_t size, off_t offset,
 {
 	ssize_t ret;
 	char abs_path[MAX_PATH_NAME];
-	uint8_t enc_buf[size + AES_KEY_SIZE];
+	uint8_t enc_buf[size];
 	uint32_t enc_buf_sz = sizeof(enc_buf);
+	struct om_file_context *context;
 
 	if (fixup_root_path(abs_path, path))
 		return -1;
 
-	ret = enc_dec_file(dirname(abs_path), buf, size, OM_OP_ENCRYPT_FILE, enc_buf, &enc_buf_sz);
+	OT_LOG(LOG_ERR, "WRITING FILE : %s", abs_path);
+
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
+
+	ret = enc_dec_file(context, buf, size, OM_OP_ENCRYPT_FILE, enc_buf, &enc_buf_sz);
 	if (ret != 0)
 		return -errno;
 
-	ret = pwrite(info->fh, enc_buf, enc_buf_sz, offset);
+	ret = pwrite(context->fd, enc_buf, enc_buf_sz, offset);
 	if (ret < 0) {
 		OT_LOG(LOG_ERR, "Failed to pwrite : %s", strerror(errno));
 		return -errno;
@@ -553,7 +624,8 @@ int oms_statfs(const char *path, struct statvfs *buf)
 */
 int oms_flush(const char *path, struct fuse_file_info *info)
 {
-	OT_LOG(LOG_ERR, "%s : flush %d", path, info->flush);
+	path = path;
+	info = info;
 	return 0;
 }
 
@@ -574,10 +646,25 @@ int oms_flush(const char *path, struct fuse_file_info *info)
 */
 int oms_release(const char *path, struct fuse_file_info *info)
 {
-	if (close(info->fh)) {
+	struct om_file_context *context;
+
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
+
+	OT_LOG(LOG_ERR, "RELEASING FILE : %s", path);
+
+	if (close(context->fd)) {
 		OT_LOG(LOG_ERR, "Failed to close %s : %s", path, strerror(errno));
 		return -errno;
 	}
+
+	/* close the GP session */
+	omnishare_closesession(context->context);
+
+	free(context->context);
+	free(context);
+	info->fh = 0;
 
 	return 0;
 }
@@ -593,11 +680,16 @@ int oms_release(const char *path, struct fuse_file_info *info)
 int oms_fsync(const char *path, int datasync, struct fuse_file_info *info)
 {
 	int ret = 0;
+	struct om_file_context *context;
+
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
 
 	if (datasync)
-		ret = fdatasync(info->fh);
+		ret = fdatasync(context->fd);
 	else
-		ret = fsync(info->fh);
+		ret = fsync(context->fd);
 
 	if (ret) {
 		OT_LOG(LOG_ERR, "Failed to fsync %s : %s", path, strerror(errno));
@@ -621,6 +713,7 @@ int oms_opendir(const char *path, struct fuse_file_info *info)
 {
 	DIR *dir;
 	char abs_path[MAX_PATH_NAME] = {0};
+	struct om_file_context *context;
 
 	if (fixup_root_path(abs_path, path))
 		return -1;
@@ -631,7 +724,15 @@ int oms_opendir(const char *path, struct fuse_file_info *info)
 		return -errno;
 	}
 
-	info->fh = (uint64_t)dir;
+	context = calloc(1, sizeof(struct om_file_context));
+	if (context == NULL) {
+		OT_LOG(LOG_ERR, "Failed to calloc : %s", strerror(errno));
+		closedir(dir);
+		return -errno;
+	}
+
+	context->fd = (uint64_t)dir;
+	info->fh = (uint64_t)context;
 
 	return 0;
 }
@@ -663,10 +764,15 @@ int oms_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offse
 {
 	DIR *dir;
 	struct dirent *dent;
+	struct om_file_context *context;
 
 	offset = offset;
 
-	dir = (DIR *)info->fh;
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
+
+	dir = (DIR *)context->fd;
 
 	for (dent = readdir(dir); dent != NULL; dent = readdir(dir)) {
 		if (filler(buf, dent->d_name, NULL, 0) != 0) {
@@ -685,10 +791,18 @@ int oms_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offse
 int oms_releasedir(const char *path, struct fuse_file_info *info)
 {
 	int ret;
+	struct om_file_context *context;
 
-	ret = closedir((DIR *)info->fh);
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
+
+	ret = closedir((DIR *)context->fd);
 	if (ret)
 		OT_LOG(LOG_ERR, "Failed to closedir %s, %s", path, strerror(errno));
+
+	free(context);
+	info->fh = 0;
 
 	return ret;
 }
@@ -760,7 +874,8 @@ void *oms_init(struct fuse_conn_info *info)
 	}
 
 	/* Load the root key into the TEE for this omnishare session */
-	ret = omnishare_init(key_buf, key_buf_size);
+	ret = omnishare_init(key_buf, key_buf_size,
+			     &((struct om_state *)fuse_get_context()->private_data)->tee_session);
 	if (ret)
 		OT_LOG(LOG_ERR, "Failed to omnishare_init : 0x%x", ret);
 
@@ -784,6 +899,8 @@ void oms_destroy(void *data)
 	struct om_state *state = (struct om_state *)data;
 
 	OT_LOG(LOG_ERR, "Finalizing and freeing %s\n", state->root_dir);
+
+	omnishare_finalize(state->tee_session);
 
 	free(state->root_dir);
 	free(state);
@@ -811,7 +928,8 @@ int oms_access(const char *path, int mode)
 
 	ret = access(abs_path, mode);
 	if (ret != 0) {
-		OT_LOG(LOG_ERR, "Failed to access : %s", strerror(errno));
+		OT_LOG(LOG_ERR, "Failed to access %s (mode %d): %s", abs_path, mode,
+		       strerror(errno));
 		ret = -errno;
 	}
 
@@ -835,9 +953,17 @@ int oms_create(const char *path, mode_t mode, struct fuse_file_info *info)
 {
 	char abs_path[MAX_PATH_NAME] = {0};
 	int fd;
+	struct om_file_context *context;
+	uint8_t *keychain = NULL;
+	int key_count = 0;
+	uint32_t key_len = AES_KEY_SIZE;
+	uint8_t enc_key[AES_KEY_SIZE] = {0};
+	int ret;
 
 	if (fixup_root_path(abs_path, path))
 		return -1;
+
+	OT_LOG(LOG_ERR, "CREATING FILE : %s", abs_path);
 
 	fd = creat(abs_path, mode);
 	if (fd < 0) {
@@ -845,9 +971,56 @@ int oms_create(const char *path, mode_t mode, struct fuse_file_info *info)
 		return -errno;
 	}
 
-	info->fh = fd;
+	context = calloc(1, sizeof(struct om_file_context));
+	if (context == NULL) {
+		OT_LOG(LOG_ERR, "Failed to calloc : %s", strerror(errno));
+		ret = -errno;
+		goto out_err;
+	}
+
+	if (rewind_path_get_key(dirname(abs_path), &keychain, &key_count, &key_len)) {
+		ret = -errno;
+		goto out_err;
+	}
+
+	if (AES_KEY_SIZE < key_len) {
+		OT_LOG(LOG_ERR, "Mismatch between AES_KEY_SIZE (%d) and key_len (%d)",
+		       AES_KEY_SIZE, key_len);
+		ret = -1;
+		goto out_err;
+	}
+
+	ret = omnishare_opensession(keychain, key_count, key_len, OM_OP_CREATE_FILE,
+				    NULL, 0, enc_key, &key_len, &context->context);
+	if (ret < 0) {
+		OT_LOG(LOG_ERR, "Failed to open session 0x%x", ret);
+		goto out_err;
+	}
+
+	if (write(fd, enc_key, key_len) < 0) {
+		OT_LOG(LOG_ERR, "Failed to write key to %s : %s", abs_path, strerror(errno));
+		ret = -errno;
+		goto out_err;
+	}
+
+	/* reset the write pointer, as it may be unexpected that the create
+	 * actually progresses the offset position
+	 */
+	if (lseek(fd, 0, SEEK_SET) < 0) {
+		OT_LOG(LOG_ERR, "Failed to lseek : %s", strerror(errno));
+		ret = -errno;
+		goto out_err;
+	}
+
+	context->fd = fd;
+	info->fh = (uint64_t)context;
 
 	return 0;
+
+out_err:
+
+	close(fd);
+	return ret;
 }
 
 
@@ -865,7 +1038,13 @@ int oms_create(const char *path, mode_t mode, struct fuse_file_info *info)
 */
 int oms_ftruncate(const char *path, off_t length, struct fuse_file_info *info)
 {
-	if (ftruncate(info->fh, length)) {
+	struct om_file_context *context;
+
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
+
+	if (ftruncate(context->fd, length + AES_KEY_SIZE)) {
 		OT_LOG(LOG_ERR, "Failure to ftruncate %s : %s", path, strerror(errno));
 		return -errno;
 	}
@@ -889,8 +1068,13 @@ int oms_ftruncate(const char *path, off_t length, struct fuse_file_info *info)
 int oms_fgetattr(const char *path, struct stat *buf, struct fuse_file_info *info)
 {
 	int ret = 0;
+	struct om_file_context *context;
 
-	ret = fstat(info->fh, buf);
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
+
+	ret = fstat(context->fd, buf);
 	if (ret != 0) {
 		OT_LOG(LOG_ERR, "Failed to fstat %s: %s", path, strerror(errno));
 		return -errno;
