@@ -95,7 +95,7 @@ case "$1" in
 		copy_files
 		;;
    *)
-		echo $"Usage: $0 {start|stop|reload|force-reload|restart|try-restart|status}"
+		echo $"Usage: $0 {start|stop|copy|reload|force-reload|restart|try-restart|status}"
 		exit 4
 		;;
 esac

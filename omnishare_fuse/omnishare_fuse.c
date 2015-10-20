@@ -42,6 +42,12 @@ struct om_state {
 	char *root_dir;
 };
 
+/* Persistant context related to an open file or directory */
+struct om_file_context {
+	uint64_t fd;
+	void *context;
+};
+
 static int recurse_dir(char *parent_dir, uint8_t **key_chain, int *key_count, uint32_t *key_len)
 {
 	char *tmp_path = strdup(parent_dir);
@@ -408,6 +414,7 @@ int oms_open(const char *path, struct fuse_file_info *info)
 {
 	int fd;
 	char abs_path[MAX_PATH_NAME];
+	struct om_file_context *context;
 
 	if (fixup_root_path(abs_path, path))
 		return -1;
@@ -418,7 +425,15 @@ int oms_open(const char *path, struct fuse_file_info *info)
 		return -errno;
 	}
 
-	info->fh = fd;
+	context = calloc(1, sizeof(struct om_file_context));
+	if (context == NULL) {
+		OT_LOG(LOG_ERR, "Failed to calloc : %s", strerror(errno));
+		close(fd);
+		return -errno;
+	}
+
+	context->fd = fd;
+	info->fh = (uint64_t)context;
 
 	return 0;
 }
@@ -444,20 +459,24 @@ int oms_read(const char *path, char *buf, size_t size, off_t offset,
 	uint8_t tmp_dec_buf[size];
 	uint32_t tmp_dec_buf_size = size;
 	struct stat s_buf;
+	struct om_file_context *context;
 
 	if (fixup_root_path(abs_path, path))
 		return -1;
 
 	if (stat(abs_path, &s_buf) != 0) {
 		OT_LOG(LOG_ERR, "Failed to call stat : %s", strerror(errno));
-		return -1;
+		return -errno;
 	}
 
-	ret = pread(info->fh, enc_buf, s_buf.st_size, offset);
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
+
+	ret = pread(context->fd, enc_buf, s_buf.st_size, offset);
 	if (ret < 0) {
 		OT_LOG(LOG_ERR, "Failed to pread : %s", strerror(errno));
-		ret = -errno;
-		goto out;
+		return -errno;
 	}
 
 	ret = enc_dec_file(dirname(abs_path), enc_buf, s_buf.st_size,
@@ -467,7 +486,6 @@ int oms_read(const char *path, char *buf, size_t size, off_t offset,
 
 	memcpy(buf, tmp_dec_buf, tmp_dec_buf_size);
 
-out:
 	return size;
 }
 
@@ -487,15 +505,20 @@ int oms_write(const char *path, const char *buf, size_t size, off_t offset,
 	char abs_path[MAX_PATH_NAME];
 	uint8_t enc_buf[size + AES_KEY_SIZE];
 	uint32_t enc_buf_sz = sizeof(enc_buf);
+	struct om_file_context *context;
 
 	if (fixup_root_path(abs_path, path))
+		return -1;
+
+	context = (struct om_file_context *)info->fh;
+	if (!context)
 		return -1;
 
 	ret = enc_dec_file(dirname(abs_path), buf, size, OM_OP_ENCRYPT_FILE, enc_buf, &enc_buf_sz);
 	if (ret != 0)
 		return -errno;
 
-	ret = pwrite(info->fh, enc_buf, enc_buf_sz, offset);
+	ret = pwrite(context->fd, enc_buf, enc_buf_sz, offset);
 	if (ret < 0) {
 		OT_LOG(LOG_ERR, "Failed to pwrite : %s", strerror(errno));
 		return -errno;
@@ -574,10 +597,20 @@ int oms_flush(const char *path, struct fuse_file_info *info)
 */
 int oms_release(const char *path, struct fuse_file_info *info)
 {
-	if (close(info->fh)) {
+	struct om_file_context *context;
+
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
+
+	/* TODO CLOSE THE GP SESSION */
+	if (close(context->fd)) {
 		OT_LOG(LOG_ERR, "Failed to close %s : %s", path, strerror(errno));
 		return -errno;
 	}
+
+	free(context);
+	info->fh = 0;
 
 	return 0;
 }
@@ -593,11 +626,16 @@ int oms_release(const char *path, struct fuse_file_info *info)
 int oms_fsync(const char *path, int datasync, struct fuse_file_info *info)
 {
 	int ret = 0;
+	struct om_file_context *context;
+
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
 
 	if (datasync)
-		ret = fdatasync(info->fh);
+		ret = fdatasync(context->fd);
 	else
-		ret = fsync(info->fh);
+		ret = fsync(context->fd);
 
 	if (ret) {
 		OT_LOG(LOG_ERR, "Failed to fsync %s : %s", path, strerror(errno));
@@ -621,6 +659,7 @@ int oms_opendir(const char *path, struct fuse_file_info *info)
 {
 	DIR *dir;
 	char abs_path[MAX_PATH_NAME] = {0};
+	struct om_file_context *context;
 
 	if (fixup_root_path(abs_path, path))
 		return -1;
@@ -631,7 +670,15 @@ int oms_opendir(const char *path, struct fuse_file_info *info)
 		return -errno;
 	}
 
-	info->fh = (uint64_t)dir;
+	context = calloc(1, sizeof(struct om_file_context));
+	if (context == NULL) {
+		OT_LOG(LOG_ERR, "Failed to calloc : %s", strerror(errno));
+		closedir(dir);
+		return -errno;
+	}
+
+	context->fd = (uint64_t)dir;
+	info->fh = (uint64_t)context;
 
 	return 0;
 }
@@ -663,10 +710,15 @@ int oms_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offse
 {
 	DIR *dir;
 	struct dirent *dent;
+	struct om_file_context *context;
 
 	offset = offset;
 
-	dir = (DIR *)info->fh;
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
+
+	dir = (DIR *)context->fd;
 
 	for (dent = readdir(dir); dent != NULL; dent = readdir(dir)) {
 		if (filler(buf, dent->d_name, NULL, 0) != 0) {
@@ -685,10 +737,18 @@ int oms_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offse
 int oms_releasedir(const char *path, struct fuse_file_info *info)
 {
 	int ret;
+	struct om_file_context *context;
 
-	ret = closedir((DIR *)info->fh);
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
+
+	ret = closedir((DIR *)context->fd);
 	if (ret)
 		OT_LOG(LOG_ERR, "Failed to closedir %s, %s", path, strerror(errno));
+
+	free(context);
+	info->fh = 0;
 
 	return ret;
 }
@@ -835,6 +895,7 @@ int oms_create(const char *path, mode_t mode, struct fuse_file_info *info)
 {
 	char abs_path[MAX_PATH_NAME] = {0};
 	int fd;
+	struct om_file_context *context;
 
 	if (fixup_root_path(abs_path, path))
 		return -1;
@@ -845,7 +906,15 @@ int oms_create(const char *path, mode_t mode, struct fuse_file_info *info)
 		return -errno;
 	}
 
-	info->fh = fd;
+	context = calloc(1, sizeof(struct om_file_context));
+	if (context == NULL) {
+		OT_LOG(LOG_ERR, "Failed to calloc : %s", strerror(errno));
+		close(fd);
+		return -errno;
+	}
+
+	context->fd = fd;
+	info->fh = (uint64_t)context;
 
 	return 0;
 }
@@ -865,7 +934,13 @@ int oms_create(const char *path, mode_t mode, struct fuse_file_info *info)
 */
 int oms_ftruncate(const char *path, off_t length, struct fuse_file_info *info)
 {
-	if (ftruncate(info->fh, length)) {
+	struct om_file_context *context;
+
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
+
+	if (ftruncate(context->fd, length)) {
 		OT_LOG(LOG_ERR, "Failure to ftruncate %s : %s", path, strerror(errno));
 		return -errno;
 	}
@@ -889,8 +964,13 @@ int oms_ftruncate(const char *path, off_t length, struct fuse_file_info *info)
 int oms_fgetattr(const char *path, struct stat *buf, struct fuse_file_info *info)
 {
 	int ret = 0;
+	struct om_file_context *context;
 
-	ret = fstat(info->fh, buf);
+	context = (struct om_file_context *)info->fh;
+	if (!context)
+		return -1;
+
+	ret = fstat(context->fd, buf);
 	if (ret != 0) {
 		OT_LOG(LOG_ERR, "Failed to fstat %s: %s", path, strerror(errno));
 		return -errno;
